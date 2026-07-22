@@ -1,0 +1,14 @@
+name: face-attendance-edu-cpu
+services:
+  backend-cpu:
+    build:
+      context: .
+      network: host
+      dockerfile: Dockerfile.cpu
+    container_name: face-attendance-edu-cpu
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models

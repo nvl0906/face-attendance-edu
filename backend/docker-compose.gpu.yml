@@ -1,0 +1,21 @@
+name: face-attendance-edu-gpu
+services:
+  backend-gpu:
+    build:
+      context: .
+      network: host
+      dockerfile: Dockerfile.gpu
+    container_name: face-attendance-edu-gpu
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
