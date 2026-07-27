@@ -65,7 +65,13 @@ app.add_middleware(
 app.include_router(authRouter.router)
 app.include_router(gestionRouter.router)
 app.include_router(faceRouter.router)  
-
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "model_loaded": getattr(app.state, "face_app", None) is not None,
+    }
+    
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     first_error = exc.errors()[0]
