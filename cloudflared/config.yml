@@ -1,0 +1,15 @@
+tunnel: node1-tunnel
+credentials-file: /etc/cloudflared/creds.json
+protocol: quic
+
+ingress:
+  - hostname: node1.samtech.qzz.io
+    service: http://localhost:8002
+  - service: http_status:404
+
+originRequest:
+  connectTimeout: 10s
+  tcpKeepAlive: 30s
+  keepAliveConnections: 10
+  keepAliveTimeout: 90s
+  http2Origin: false

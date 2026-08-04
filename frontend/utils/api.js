@@ -1,41 +1,69 @@
 import axios from "axios";
 import * as SecureStore from 'expo-secure-store';
 
-// All known backend nodes. Add/remove entries here as machines come online
-// or go away — nothing else in the app needs to change.
-const BACKEND_URLS = [
-  "https://attendance.samtech.qzz.io"
+// Nodes grouped by tier. GPU nodes are tried first — even if a CPU node
+// happens to answer its health check faster, GPU is still preferred as
+// long as at least one GPU node responds within GPU_TIER_TIMEOUT_MS.
+// Only if the entire GPU tier fails/times out does the CPU tier get tried.
+const BACKEND_TIERS = [
+  {
+    type: "gpu",
+    urls: [
+      "https://node1.samtech.qzz.io"
+    ],
+  },
+  {
+    type: "cpu",
+    urls: [
+
+    ],
+  },
 ];
 
 const STORAGE_KEY = "backendBaseUrl";
 const HEALTH_CHECK_TIMEOUT_MS = 3000;
+// How long to wait for the GPU tier specifically before giving up on it
+// and falling back to CPU. Shorter than HEALTH_CHECK_TIMEOUT_MS so a single
+// slow/dead GPU machine doesn't stall the whole selection process.
+const GPU_TIER_TIMEOUT_MS = 1500;
 const REVALIDATE_INTERVAL_MS = 5 * 60 * 1000; // re-check cached URL every 5 min while app is open
 
 let lastValidatedAt = 0;
 
+function raceUrls(urls, timeoutMs) {
+  return Promise.any(
+    urls.map((url) =>
+      axios
+        .get(`${url}/health`, { timeout: timeoutMs })
+        .then((res) => {
+          if (res.data?.status !== "ok") throw new Error("unhealthy");
+          return url;
+        })
+    )
+  );
+}
+
 /**
- * Races a health check against every known backend in parallel and
- * resolves with whichever responds successfully first. Dead/slow machines
- * never block this — Promise.any resolves the instant one candidate wins,
- * it doesn't wait for the others to time out.
+ * Tries the GPU tier first (raced against itself, with a short deadline).
+ * Falls back to the CPU tier only if every GPU node fails or times out.
+ * Within a tier, whichever node answers first wins — priority is
+ * tier-level (GPU > CPU), not based on raw response speed across tiers.
  */
 async function findFastestHealthyUrl() {
-  try {
-    const winner = await Promise.any(
-      BACKEND_URLS.map((url) =>
-        axios
-          .get(`${url}/health`, { timeout: HEALTH_CHECK_TIMEOUT_MS })
-          .then((res) => {
-            if (res.data?.status !== "ok") throw new Error("unhealthy");
-            return url;
-          })
-      )
-    );
-    return winner;
-  } catch (aggregateError) {
-    // Every single backend failed the race.
-    throw new Error("No healthy backend available");
+  for (const tier of BACKEND_TIERS) {
+    if (tier.urls.length === 0) continue;
+    try {
+      const winner = await raceUrls(
+        tier.urls,
+        tier.type === "gpu" ? GPU_TIER_TIMEOUT_MS : HEALTH_CHECK_TIMEOUT_MS
+      );
+      return winner;
+    } catch {
+      // Entire tier failed — fall through to the next one.
+      continue;
+    }
   }
+  throw new Error("No healthy backend available");
 }
 
 async function getBaseUrl({ forceRevalidate = false } = {}) {

@@ -51,3 +51,5 @@ frontend/google-services.json
 frontend/node_modules/
 backend/.env
 backend/models/
+
+cloudflared/creds.json
