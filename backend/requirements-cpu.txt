@@ -82,3 +82,9 @@ psutil==7.2.1
 filelock==3.13.1
 packaging==25.0
 six==1.17.0
+
+# --- Missing packages ---
+exponent_server_sdk==2.2.0
+pillow==11.3.0
+aiofiles==24.1.0
+babel==2.17.0
