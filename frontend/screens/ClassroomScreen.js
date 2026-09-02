@@ -67,7 +67,7 @@ const ClassroomScreen = ({ route, navigation }) => {
       const fileUri = FileSystem.cacheDirectory + fileName;
 
       // Axios GET request with token
-      const BACKEND_URL = "https://attendance.samtech.qzz.io"
+      const BACKEND_URL = "https://node2.samtech.qzz.io"
       const response = await axios.post(
         `${BACKEND_URL}/download`,
         {

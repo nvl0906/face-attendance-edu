@@ -79,18 +79,6 @@ const SettingsScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {/* App Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>APPLICATION</Text>
-          <TouchableOpacity style={styles.row} activeOpacity={0.7}>
-            <View style={styles.rowIcon}><Text style={styles.icon}>🔐</Text></View>
-            <View style={styles.rowContent}>
-              <Text style={styles.rowMain}>Changer le mot de passe</Text>
-            </View>
-            <Text style={styles.chevron}>›</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Logout */}
         <TouchableOpacity
           style={styles.logoutButton}

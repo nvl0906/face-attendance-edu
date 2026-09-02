@@ -4,7 +4,6 @@ import SignInScreen from './screens/SignInScreen';
 import AuthScreen from './screens/AuthScreen';
 import Toast, { BaseToast, ErrorToast } from 'react-native-toast-message';
 import { useColorScheme } from "react-native";
-import { useEffect } from "react";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -17,7 +16,6 @@ import SettingsScreen from './screens/SettingsScreen';
 import useThemeStore from './stores/useThemeStore';
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import useUserStore from './stores/useUserStore';
-import { warmBackendSelection } from './utils/api';
 
 const Stack = createNativeStackNavigator();
 
@@ -147,21 +145,14 @@ function RootNavigator() {
 export default function App() {
   const scheme = useColorScheme();
 
-  // Kick off the parallel backend health-check race as early as possible,
-  // in the background, so the cached "best backend" is already warm by
-  // the time the user reaches their first real API call (e.g. login).
-  useEffect(() => {
-    warmBackendSelection();
-  }, []);
-
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <BottomSheetModalProvider>
-        <NavigationContainer theme={scheme === "dark" ? DarkTheme : DefaultTheme} >
-          <RootNavigator />
-        </NavigationContainer>
-        <Toast config={toastConfig} />
-      </BottomSheetModalProvider>
-    </GestureHandlerRootView>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <BottomSheetModalProvider>
+          <NavigationContainer theme={scheme === "dark" ? DarkTheme : DefaultTheme} >
+            <RootNavigator />
+          </NavigationContainer>
+          <Toast config={toastConfig} />
+        </BottomSheetModalProvider>
+      </GestureHandlerRootView>
   );
 }

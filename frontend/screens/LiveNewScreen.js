@@ -198,7 +198,7 @@ export default function LiveNewScreen({ route }) {
       const token = await SecureStore.getItemAsync('token');
       if (!token || cancelled) { isConnecting.current = false; return; }
 
-      ws.current = new WebSocket(`wss://attendance.samtech.qzz.io/recognize?token=${token}`);
+      ws.current = new WebSocket(`wss://node2.samtech.qzz.io/recognize?token=${token}`);
 
       ws.current.onopen = () => {
         isConnecting.current = false;
