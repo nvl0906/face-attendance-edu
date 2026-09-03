@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 from fastapi import APIRouter, Depends, Query, WebSocket, File, UploadFile, HTTPException
 from supabase import AsyncClient
-from dependencies import get_current_user, get_supabase, verify_token, get_face_app
+from dependencies import get_current_user, get_supabase, verify_token, get_face_app, get_embedding_store
 
 router = APIRouter()
 
@@ -120,94 +120,50 @@ async def setup_profile(
 
     return {"message": "Profile set up successfully", "profile_url": profile_url}
 
-
 @router.post("/embeddings")
 async def get_embeddings(
     data: dict,
     db: AsyncClient = Depends(get_supabase),
-    user            = Depends(get_current_user),
     face_app        = Depends(get_face_app),
+    embedding_store: EmbeddingStore = Depends(get_embedding_store),  # from app.state
 ):
-    class_id   = data.get("class_id")
-    class_name = data.get("class_name")
-
-    if not class_id or not class_name:
-        raise HTTPException(status_code=422, detail="class_id and class_name are required")
+    class_id = data.get("class_id")  # this is classroom_id
+    if not class_id:
+        raise HTTPException(status_code=422, detail="class_id is required")
 
     response = await (
-        db.table("student")
-        .select("id, fullname, profile")
-        .eq("classroom_id", class_id)
-        .execute()
+        db.table("student").select("id, fullname, profile").eq("classroom_id", class_id).execute()
     )
-
     if not response.data:
         return {"status": "error", "message": "Aucun étudiant trouvé pour cette salle"}
 
-    known_faces = {}
-    student_ids = {}
-    skipped     = []
-
+    loaded, skipped = 0, []
     async with httpx.AsyncClient() as client:
         for student in response.data:
-            fullname    = student["fullname"]
-            student_id  = student["id"]
-            profile_url = student.get("profile")
-
-            student_ids[fullname] = student_id
-
+            fullname, student_id, profile_url = student["fullname"], student["id"], student.get("profile")
             if not profile_url:
-                skipped.append(fullname)
-                continue
-
-            # 2. Download image
+                skipped.append(fullname); continue
             try:
                 resp = await client.get(profile_url, timeout=10.0)
                 resp.raise_for_status()
                 img_bytes = resp.content
-            except Exception as e:
-                skipped.append(fullname)
-                continue
+            except Exception:
+                skipped.append(fullname); continue
 
-            # 3. Decode image → BGR numpy array (same as WebSocket flow)
             np_img = np.frombuffer(img_bytes, np.uint8)
-            img    = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-
+            img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
             if img is None:
-                skipped.append(fullname)
-                continue
+                skipped.append(fullname); continue
 
-            # 4. Run InsightFace
             faces = face_app.get(img)
+            if not faces or faces[0].embedding.shape[0] != 512:
+                skipped.append(fullname); continue
 
-            if not faces:
-                skipped.append(fullname)
-                continue
+            embedding = normalize(faces[0].embedding)
+            await embedding_store.upsert(class_id, student_id, fullname, embedding)
+            loaded += 1
 
-            embedding = faces[0].embedding
-
-            if embedding.shape[0] != 512:
-                skipped.append(fullname)
-                continue
-
-            known_faces[fullname] = normalize(embedding)
-
-    if not known_faces:
-        return {
-            "status":  "error",
-            "message": "No valid face encodings could be built",
-            "skipped": skipped,
-        }
-
-    create_dynamic_var(f"{user.username}_{class_name}_id", student_ids)
-    create_dynamic_var(f"{user.username}_{class_name}", known_faces)
-
-    return {
-        "status":  "success",
-        "message": "Embeddings récupérés avec succès",
-        "loaded":  len(known_faces),
-        "skipped": skipped,
-    }
+    return {"status": "success", "message": "Embeddings récupérés avec succès", "loaded": loaded, "skipped": skipped}
 
 @router.websocket("/recognize")
 async def ws_recognize(ws: WebSocket, token: str = Query(...)):
@@ -220,7 +176,8 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
 
     face_app        = ws.app.state.face_app
     db: AsyncClient = ws.app.state.supabase
-    cooldown        = ws.app.state.cooldown_store   # <-- new
+    cooldown        = ws.app.state.cooldown_store
+    embedding_store = ws.app.state.embedding_store 
 
     try:
         while True:
@@ -271,12 +228,13 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
 
                 faces   = face_app.get(img)
                 matches = set()
+                await embedding_store.ensure_loaded(classroom_id)
 
                 for face in faces:
-                    name = match_face(face.embedding.flatten(), class_name)
-                    if not name:
+                    result = embedding_store.match(classroom_id, face.embedding.flatten())
+                    if not result:
                         continue
-
+                    student_id, name = result
                     matches.add(name)
 
                     student_id = get_student_id_by_fullname(name, class_id_key)

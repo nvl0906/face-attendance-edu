@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from insightface.app import FaceAnalysis
 from supabase import acreate_client
 from  routers import authRouter, faceRouter, gestionRouter
-from utils.cache import CooldownStore
+from utils.cache import CooldownStore, EmbeddingStore
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,14 +41,17 @@ async def lifespan(app: FastAPI):
     
     app.state.supabase = supabase_client
     app.state.cooldown_store = CooldownStore(supabase_client, cooldown_minutes=1)
+    app.state.embedding_store = EmbeddingStore(supabase_client)
     app.state.face_app = face_app
     
     await app.state.cooldown_store.start()
+    await app.state.embedding_store.start()
 
     yield
 
     del app.state.face_app 
     await app.state.cooldown_store.stop()
+    await app.state.embedding_store.stop()
     await app.state.supabase.aclose()
 
 app = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)

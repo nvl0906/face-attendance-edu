@@ -49,3 +49,6 @@ async def get_supabase(request: Request) -> AsyncClient:
 
 def get_face_app(request: Request) -> FaceAnalysis:
     return request.app.state.face_app
+
+def get_embedding_store(request: Request):
+    return request.app.state.embedding_store

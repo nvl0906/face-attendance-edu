@@ -10,6 +10,8 @@ Redis/pubsub layer.
 
 import asyncio
 from datetime import datetime, timezone
+import numpy as np
+from scipy.spatial.distance import cosine
 
 
 class CooldownStore:
@@ -56,7 +58,7 @@ class CooldownStore:
     async def _seed_from_db(self):
         cutoff = datetime.now(timezone.utc).timestamp() - self._cooldown * 60
         cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
-    
+
         resp = await (
             self._supabase.table("attendance")
             .select("student_id, classroom_id, checked")
@@ -112,3 +114,88 @@ class CooldownStore:
             ]
             for k in stale:
                 del self._cache[k]
+
+
+class EmbeddingStore:
+    def __init__(self, supabase, threshold: float = 0.59999):
+        self._supabase = supabase
+        self._threshold = threshold
+        # classroom_id -> { student_id: (fullname, embedding) }
+        self._cache: dict[str, dict[str, tuple[str, np.ndarray]]] = {}
+        self._loaded_classrooms: set[str] = set()
+        self._channel = None
+
+    async def start(self):
+        self._channel = self._supabase.channel("face-embedding-sync")
+        self._channel.on_postgres_changes(
+            "INSERT", schema="public", table="face_embedding", callback=self._on_change,
+        )
+        self._channel.on_postgres_changes(
+            "UPDATE", schema="public", table="face_embedding", callback=self._on_change,
+        )
+        await self._channel.subscribe()
+
+    async def stop(self):
+        if self._channel is not None:
+            await self._supabase.remove_channel(self._channel)
+            self._channel = None
+
+    # ── lazy per-classroom load — don't pull every classroom on boot ────
+    async def ensure_loaded(self, classroom_id: str):
+        if classroom_id in self._loaded_classrooms:
+            return
+        resp = await (
+            self._supabase.table("face_embedding")
+            .select("student_id, fullname, embedding")
+            .eq("classroom_id", classroom_id)
+            .execute()
+        )
+        bucket = self._cache.setdefault(classroom_id, {})
+        for row in resp.data or []:
+            bucket[row["student_id"]] = (row["fullname"], np.array(row["embedding"], dtype=np.float32))
+        self._loaded_classrooms.add(classroom_id)
+
+    # ── realtime callback keeps every node's cache current ─────────────
+    def _on_change(self, payload: dict):
+        record = (
+            payload.get("data", {}).get("record")
+            or payload.get("record")
+            or payload.get("new")
+            or {}
+        )
+        classroom_id = record.get("classroom_id")
+        student_id = record.get("student_id")
+        fullname = record.get("fullname")
+        embedding = record.get("embedding")
+        if not (classroom_id and student_id and fullname and embedding):
+            return
+        bucket = self._cache.setdefault(classroom_id, {})
+        bucket[student_id] = (fullname, np.array(embedding, dtype=np.float32))
+        self._loaded_classrooms.add(classroom_id)  # in case an insert arrives before ensure_loaded ever ran
+
+    # ── write path — called from /embeddings after computing a face ────
+    async def upsert(self, classroom_id: str, student_id: str, fullname: str, embedding: np.ndarray):
+        await (
+            self._supabase.table("face_embedding")
+            .upsert({
+                "classroom_id": classroom_id,
+                "student_id":   student_id,
+                "fullname":     fullname,
+                "embedding":    embedding.tolist(),
+            })
+            .execute()
+        )
+        # optimistic local update — same reasoning as CooldownStore.mark_locally
+        self._cache.setdefault(classroom_id, {})[student_id] = (fullname, embedding)
+
+    # ── match — same cosine logic as before, just reading the new cache ─
+    def match(self, classroom_id: str, embedding: np.ndarray) -> tuple[str, str] | None:
+        embedding = embedding / (np.linalg.norm(embedding) or 1)
+        best, best_dist = None, float("inf")
+        for student_id, (fullname, known) in self._cache.get(classroom_id, {}).items():
+            if embedding.shape != known.shape:
+                continue
+            dist = cosine(embedding, known)
+            if dist < self._threshold and dist < best_dist:
+                best, best_dist = (student_id, fullname), dist
+        return best
