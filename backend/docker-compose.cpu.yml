@@ -11,4 +11,5 @@ services:
     env_file:
       - .env
     volumes:
-      - ./models:/app/models
+      - .:/app
+      - ./models:/app/models:ro

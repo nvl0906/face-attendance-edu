@@ -10,52 +10,52 @@ from fastapi.exceptions import RequestValidationError
 from insightface.app import FaceAnalysis
 from supabase import acreate_client
 from  routers import authRouter, faceRouter, gestionRouter
+from utils.cache import CooldownStore
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        url = os.getenv("FAE_SUPABASE_URL")
-        key = os.getenv("FAE_SUPABASE_KEY")
-        
-        # Only load detection + recognition — skip landmark, age/gender, gaze
-        face_app = FaceAnalysis(
-            name="buffalo_l",
-            root="/app",
-            allowed_modules=['detection', 'recognition'],
-            providers=[
-                (
-                    'CUDAExecutionProvider', {
-                        'device_id':                0,
-                        'arena_extend_strategy':    'kNextPowerOfTwo',
-                        'gpu_mem_limit':            2 * 1024 * 1024 * 1024,  # 2GB cap
-                        'cudnn_conv_algo_search':   'EXHAUSTIVE',  # finds fastest conv algo
-                        'do_copy_in_default_stream': True,
-                    }
-                ),
-                'CPUExecutionProvider',  # fallback if CUDA op isn't supported
-            ]
-        )
-        face_app.prepare(ctx_id=0, det_size=(320, 320))
-        
-        supabase_client = await acreate_client(url, key)
-        
-        app.state.supabase = supabase_client
-        app.state.face_app = face_app
-        
-    except Exception as e:
-        raise 
+    url = os.getenv("FAE_SUPABASE_URL")
+    key = os.getenv("FAE_SUPABASE_KEY")
+    
+    # Only load detection + recognition — skip landmark, age/gender, gaze
+    face_app = FaceAnalysis(
+        name="buffalo_l",
+        root="/app",
+        allowed_modules=['detection', 'recognition'],
+        providers=[
+            (
+                'CUDAExecutionProvider', {
+                    'device_id':                0,
+                    'arena_extend_strategy':    'kNextPowerOfTwo',
+                    'gpu_mem_limit':            2 * 1024 * 1024 * 1024,  # 2GB cap
+                    'cudnn_conv_algo_search':   'EXHAUSTIVE',  # finds fastest conv algo
+                    'do_copy_in_default_stream': True,
+                }
+            ),
+            'CPUExecutionProvider',  # fallback if CUDA op isn't supported
+        ]
+    )
+    face_app.prepare(ctx_id=0, det_size=(320, 320))
+    
+    supabase_client = await acreate_client(url, key)
+    
+    app.state.supabase = supabase_client
+    app.state.cooldown_store = CooldownStore(supabase_client, cooldown_minutes=1)
+    app.state.face_app = face_app
+    
+    await app.state.cooldown_store.start()
 
-    try:
-        yield
-    finally:
-        del app.state.face_app 
-        await app.state.supabase.aclose()
+    yield
+
+    del app.state.face_app 
+    await app.state.cooldown_store.stop()
+    await app.state.supabase.aclose()
 
 app = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://node2.samtech.qzz.io"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],
