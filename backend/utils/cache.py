@@ -56,7 +56,7 @@ class CooldownStore:
     async def _seed_from_db(self):
         cutoff = datetime.now(timezone.utc).timestamp() - self._cooldown * 60
         cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
-
+    
         resp = await (
             self._supabase.table("attendance")
             .select("student_id, classroom_id, checked")

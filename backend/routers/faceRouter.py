@@ -14,36 +14,6 @@ from dependencies import get_current_user, get_supabase, verify_token, get_face_
 
 router = APIRouter()
 
-# ── Per-class cooldown tracker ─────────────────────────────────────────────
-# Structure: { class_name: { student_name: datetime_last_marked } }
-_marked: dict[str, dict[str, datetime]] = {}
-_COOLDOWN_MINUTES = 1
-
-
-def _is_on_cooldown(class_name: str, student_name: str) -> bool:
-    now    = datetime.now(timezone.utc)
-    marked = _marked.get(class_name, {})
-    last   = marked.get(student_name)
-    return last is not None and (now - last).total_seconds() < _COOLDOWN_MINUTES * 60
-
-
-def _mark_student(class_name: str, student_name: str):
-    if class_name not in _marked:
-        _marked[class_name] = {}
-    _marked[class_name][student_name] = datetime.now(timezone.utc)
-
-
-def _clear_expired(class_name: str):
-    """Remove entries older than the cooldown window."""
-    now     = datetime.now(timezone.utc)
-    bucket  = _marked.get(class_name, {})
-    expired = [
-        name for name, ts in bucket.items()
-        if (now - ts).total_seconds() >= _COOLDOWN_MINUTES * 60
-    ]
-    for name in expired:
-        del bucket[name]
-
 def create_dynamic_var(name: str, value):
     if name in globals():
         del globals()[name]
@@ -239,7 +209,6 @@ async def get_embeddings(
         "skipped": skipped,
     }
 
-
 @router.websocket("/recognize")
 async def ws_recognize(ws: WebSocket, token: str = Query(...)):
     user = await verify_token(token)
@@ -251,10 +220,10 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
 
     face_app        = ws.app.state.face_app
     db: AsyncClient = ws.app.state.supabase
+    cooldown        = ws.app.state.cooldown_store   # <-- new
 
     try:
         while True:
-            # ── 1. Receive metadata ──────────────────────────────────────
             try:
                 message = await ws.receive_text()
             except (ConnectionClosedOK, ConnectionClosedError) as e:
@@ -268,7 +237,6 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                 classroom_id = data.get("classroom_id")
             except Exception as e:
                 print(f"[WS] Bad metadata: {e}")
-                # Consume the image bytes to keep protocol in sync, then continue
                 try:
                     await ws.receive_bytes()
                 except Exception:
@@ -283,7 +251,6 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                     break
                 continue
 
-            # ── 2. Receive image ─────────────────────────────────────────
             try:
                 img_data = await ws.receive_bytes()
             except (ConnectionClosedOK, ConnectionClosedError) as e:
@@ -294,7 +261,6 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                 await ws.send_json({"status": "error", "message": "Image non défini!"})
                 continue
 
-            # ── 3. Process frame — fully isolated, never crashes the loop ─
             try:
                 np_img = np.frombuffer(img_data, np.uint8)
                 img    = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
@@ -306,8 +272,6 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                 faces   = face_app.get(img)
                 matches = set()
 
-                _clear_expired(class_name)
-
                 for face in faces:
                     name = match_face(face.embedding.flatten(), class_name)
                     if not name:
@@ -315,12 +279,12 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
 
                     matches.add(name)
 
-                    if _is_on_cooldown(class_name, name):
-                        continue
-
                     student_id = get_student_id_by_fullname(name, class_id_key)
                     if not student_id:
                         print(f"[WS] Student not in cache: {name}")
+                        continue
+
+                    if cooldown.is_on_cooldown(classroom_id, student_id):   # <-- was _is_on_cooldown(class_name, name)
                         continue
 
                     await (
@@ -332,7 +296,7 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                         .execute()
                     )
 
-                    _mark_student(class_name, name)
+                    cooldown.mark_locally(classroom_id, student_id)         # <-- was _mark_student(class_name, name)
                     print(f"[WS] Attendance marked: {name}")
 
                 await ws.send_json({
@@ -345,12 +309,10 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                 break
 
             except Exception as e:
-                # Frame processing error — log it, try to reply, keep loop alive
                 print(f"[Error] Processing frame: {e}")
                 try:
                     await ws.send_json({"status": "error", "message": str(e)})
                 except Exception:
-                    # Socket is gone — exit cleanly
                     break
 
     except Exception as e:
