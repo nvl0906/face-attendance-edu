@@ -269,8 +269,6 @@ export default function LiveNewScreen({ route }) {
         if (ws.current?.readyState !== WebSocket.OPEN) return;
 
         ws.current.send(JSON.stringify({
-          class:        `${username}_${classroom.name}`,
-          class_id:     `${username}_${classroom.name}_id`,
           classroom_id: classroom.id,
         }));
 

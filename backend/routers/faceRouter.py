@@ -11,41 +11,15 @@ from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 from fastapi import APIRouter, Depends, Query, WebSocket, File, UploadFile, HTTPException
 from supabase import AsyncClient
 from dependencies import get_current_user, get_supabase, verify_token, get_face_app, get_embedding_store
+from utils.cache import EmbeddingStore
 
 router = APIRouter()
-
-def create_dynamic_var(name: str, value):
-    if name in globals():
-        del globals()[name]
-    globals()[name] = value
-
 
 def normalize(vec: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vec)
     if norm == 0:
         return vec
     return vec / norm
-
-
-def match_face(embedding: np.ndarray, class_name: str, threshold: float = 0.59999):
-    known_faces   = globals().get(class_name, {})
-    embedding     = normalize(embedding)
-    best_match    = None
-    best_distance = float("inf")
-
-    for name, known_emb in known_faces.items():
-        if embedding.shape != known_emb.shape:
-            continue
-        dist = cosine(embedding, known_emb)
-        if dist < threshold and dist < best_distance:
-            best_match    = name
-            best_distance = dist
-
-    return best_match
-
-def get_student_id_by_fullname(fullname: str, class_id_key: str) -> str | None:
-    student_ids = globals().get(class_id_key, {})
-    return student_ids.get(fullname)
 
 @router.post("/setup-profile")
 async def setup_profile(
@@ -189,8 +163,6 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
 
             try:
                 data         = json.loads(message)
-                class_name   = data.get("class")
-                class_id_key = data.get("class_id")
                 classroom_id = data.get("classroom_id")
             except Exception as e:
                 print(f"[WS] Bad metadata: {e}")
@@ -200,8 +172,8 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                     break
                 continue
 
-            if not classroom_id or not class_name or not class_id_key:
-                await ws.send_json({"status": "error", "message": "class, class_id, classroom_id are required"})
+            if not classroom_id:
+                await ws.send_json({"status": "error", "message": "classroom_id is required"})
                 try:
                     await ws.receive_bytes()
                 except Exception:
@@ -237,12 +209,8 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                     student_id, name = result
                     matches.add(name)
 
-                    student_id = get_student_id_by_fullname(name, class_id_key)
-                    if not student_id:
-                        print(f"[WS] Student not in cache: {name}")
-                        continue
-
                     if cooldown.is_on_cooldown(classroom_id, student_id):   # <-- was _is_on_cooldown(class_name, name)
+                        print("on cooldown")
                         continue
 
                     await (
