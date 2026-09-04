@@ -56,6 +56,7 @@ class CooldownStore:
 
     # ── seeding (covers restarts: don't re-fire for people just marked) ──
     async def _seed_from_db(self):
+        # Add UTC
         MADAGASCAR_OFFSET_SECONDS = 3 * 3600  # DB stores `checked` shifted +3h (Etc/GMT-3 default)
 
         cutoff = datetime.now(timezone.utc).timestamp() - self._cooldown * 60 + MADAGASCAR_OFFSET_SECONDS
