@@ -12,6 +12,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import numpy as np
 from scipy.spatial.distance import cosine
+from dateutil.parser import parse as parse_dt
 
 MADAGASCAR_OFFSET = timedelta(hours=3)
 
@@ -88,7 +89,7 @@ class CooldownStore:
 
     def _update(self, classroom_id: str, student_id: str, checked_iso: str):
         key = (classroom_id, student_id)
-        ts = datetime.fromisoformat(checked_iso)
+        ts = parse_dt(checked_iso)
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         ts -= MADAGASCAR_OFFSET
