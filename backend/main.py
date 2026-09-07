@@ -58,7 +58,7 @@ app = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://node2.samtech.qzz.io"],
+    allow_origins=["https://presensia.samtech.qzz.io"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["*"],

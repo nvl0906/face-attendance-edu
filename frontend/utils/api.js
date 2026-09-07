@@ -1,7 +1,7 @@
 import axios from "axios";
 import * as SecureStore from 'expo-secure-store';
 
-const BASE_URL = "https://node2.samtech.qzz.io";
+const BASE_URL = "https://presensia.samtech.qzz.io";
 
 const api = axios.create({
   baseURL: BASE_URL,
