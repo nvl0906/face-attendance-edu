@@ -9,9 +9,11 @@ Redis/pubsub layer.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import numpy as np
 from scipy.spatial.distance import cosine
+
+MADAGASCAR_OFFSET = timedelta(hours=3)
 
 
 class CooldownStore:
@@ -56,10 +58,8 @@ class CooldownStore:
 
     # ── seeding (covers restarts: don't re-fire for people just marked) ──
     async def _seed_from_db(self):
-        # Add UTC
-        MADAGASCAR_OFFSET_SECONDS = 3 * 3600  # DB stores `checked` shifted +3h (Etc/GMT-3 default)
 
-        cutoff = datetime.now(timezone.utc).timestamp() - self._cooldown * 60 + MADAGASCAR_OFFSET_SECONDS
+        cutoff = datetime.now(timezone.utc).timestamp() - self._cooldown * 60
         cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
 
         resp = await (
@@ -91,6 +91,7 @@ class CooldownStore:
         ts = datetime.fromisoformat(checked_iso)
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
+        ts -= MADAGASCAR_OFFSET
         if key not in self._cache or ts > self._cache[key]:
             self._cache[key] = ts
 
