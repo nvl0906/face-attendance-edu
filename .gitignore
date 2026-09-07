@@ -52,4 +52,4 @@ frontend/node_modules/
 backend/.env
 backend/models/
 
-cloudflared/creds.json
+backend/*.pyc
