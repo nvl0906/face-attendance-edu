@@ -203,17 +203,17 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                 await embedding_store.ensure_loaded(classroom_id)
 
                 for face in faces:
-                    result = embedding_store.match(classroom_id, face.embedding.flatten())
-                    if not result:
+                    match_result = embedding_store.match(classroom_id, face.embedding.flatten())
+                    if not match_result:
                         continue
-                    student_id, name = result
+                    student_id, name = match_result
                     matches.add(name)
 
-                    if cooldown.is_on_cooldown(classroom_id, student_id):   # <-- was _is_on_cooldown(class_name, name)
+                    if cooldown.is_on_cooldown(classroom_id, student_id):
                         print("on cooldown")
                         continue
 
-                    await (
+                    insert_response = await (
                         db.table("attendance")
                         .insert({
                             "student_id":   student_id,
@@ -222,7 +222,7 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                         .execute()
                     )
 
-                    checked_val = result.data[0]["checked"] if result.data else None
+                    checked_val = insert_response.data[0]["checked"] if insert_response.data else None
                     cooldown.mark_locally(classroom_id, student_id, checked_val)
                     print(f"[WS] Attendance marked: {name}")
 
