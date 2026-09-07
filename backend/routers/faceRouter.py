@@ -222,7 +222,8 @@ async def ws_recognize(ws: WebSocket, token: str = Query(...)):
                         .execute()
                     )
 
-                    cooldown.mark_locally(classroom_id, student_id)         # <-- was _mark_student(class_name, name)
+                    checked_val = result.data[0]["checked"] if result.data else None
+                    cooldown.mark_locally(classroom_id, student_id, checked_val)
                     print(f"[WS] Attendance marked: {name}")
 
                 await ws.send_json({

@@ -103,10 +103,16 @@ class CooldownStore:
             datetime.now(timezone.utc) - last
         ).total_seconds() < self._cooldown * 60
 
-    def mark_locally(self, classroom_id: str, student_id: str):
-        """Call right after a successful insert on THIS node, so it doesn't
-        double-fire on the next frame while the realtime event is in flight."""
-        self._cache[(classroom_id, student_id)] = datetime.now(timezone.utc)
+    def mark_locally(self, classroom_id: str, student_id: str, checked_iso: str | None = None):
+        """Call right after a successful insert on THIS node. Pass the `checked`
+        value Postgres actually assigned (from the insert response), so every
+        node's cooldown clock is anchored to Postgres's clock — not this node's
+        local wall clock, which can drift from Postgres's and from other nodes'."""
+        if checked_iso is not None:
+            self._update(classroom_id, student_id, checked_iso)
+        else:
+            # fallback only if the insert response somehow didn't include it
+            self._cache[(classroom_id, student_id)] = datetime.now(timezone.utc)
 
     # ── keep the dict from growing forever over a long-running process ──
     async def _prune_loop(self):
