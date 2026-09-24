@@ -18,7 +18,7 @@ jobs:
           sudo chown -R 1000:1000 /repo
       - name: Restart backend container
         run: |
-          if docker ps --format '{{.Names}}' | grep -q '^tmi-attendance-cpu$'; then
+          if docker ps --format '{{.Names}}' | grep -q '^face-attendance-edu-cpu$'; then
             echo "Container running — restarting"
             docker compose -f /home/naval/face-attendance-edu/backend/docker-compose.cpu.yml restart
           else
@@ -39,7 +39,7 @@ jobs:
           sudo chown -R 1000:1000 /repo
       - name: Restart backend container
         run: |
-          if docker ps --format '{{.Names}}' | grep -q '^tmi-attendance-cpu$'; then
+          if docker ps --format '{{.Names}}' | grep -q '^face-attendance-edu-cpu$'; then
             echo "Container running — restarting"
             docker compose -f /home/naval/face-attendance-edu/backend/docker-compose.gpu.yml restart
           else
