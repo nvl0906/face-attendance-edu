@@ -1,5 +1,5 @@
 import os
-import jwt
+from jose import jwt, JWTError
 from typing import Annotated
 from pydantic import BaseModel
 from fastapi import Request, HTTPException, status, Depends
