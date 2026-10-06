@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     del app.state.face_app 
     await app.state.cooldown_store.stop()
     await app.state.embedding_store.stop()
-    await app.state.supabase.aclose()
+    await app.state.supabase.postgrest.aclose()
 
 app = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
 
