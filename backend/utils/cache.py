@@ -190,8 +190,6 @@ class EmbeddingStore:
         embedding = embedding / (np.linalg.norm(embedding) or 1)
         best, best_dist = None, float("inf")
         for student_id, (fullname, known) in self._cache.get(classroom_id, {}).items():
-            if embedding.shape != known.shape:
-                continue
             dist = cosine(embedding, known)
             if dist < self._threshold and dist < best_dist:
                 best, best_dist = (student_id, fullname), dist
