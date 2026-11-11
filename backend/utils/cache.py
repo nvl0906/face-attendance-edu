@@ -139,10 +139,7 @@ class EmbeddingStore:
     async def start(self):
         self._channel = self._supabase.channel("face-embedding-sync")
         self._channel.on_postgres_changes(
-            "INSERT", schema="public", table="face_embedding", callback=self._on_change,
-        )
-        self._channel.on_postgres_changes(
-            "UPDATE", schema="public", table="face_embedding", callback=self._on_change,
+            "UPDATE", schema="public", table="student", callback=self._on_change,
         )
         await self._channel.subscribe()
 
@@ -156,14 +153,14 @@ class EmbeddingStore:
         if classroom_id in self._loaded_classrooms:
             return
         resp = await (
-            self._supabase.table("face_embedding")
-            .select("student_id, fullname, embedding")
+            self._supabase.table("student")
+            .select("id, fullname, embedding")
             .eq("classroom_id", classroom_id)
             .execute()
         )
         bucket = self._cache.setdefault(classroom_id, {})
         for row in resp.data or []:
-            bucket[row["student_id"]] = (row["fullname"], np.array(row["embedding"], dtype=np.float32))
+            bucket[row["id"]] = (row["fullname"], np.array(row["embedding"], dtype=np.float32))
         self._loaded_classrooms.add(classroom_id)
 
     # ── realtime callback keeps every node's cache current ─────────────
@@ -175,28 +172,17 @@ class EmbeddingStore:
             or {}
         )
         classroom_id = record.get("classroom_id")
-        student_id = record.get("student_id")
+        student_id = record.get("id")
         fullname = record.get("fullname")
         embedding = record.get("embedding")
         if not (classroom_id and student_id and fullname and embedding):
             return
         bucket = self._cache.setdefault(classroom_id, {})
         bucket[student_id] = (fullname, np.array(embedding, dtype=np.float32))
-        self._loaded_classrooms.add(classroom_id)  # in case an insert arrives before ensure_loaded ever ran
+        self._loaded_classrooms.add(classroom_id)
 
     # ── write path — called from /embeddings after computing a face ────
     async def upsert(self, classroom_id: str, student_id: str, fullname: str, embedding: np.ndarray):
-        await (
-            self._supabase.table("face_embedding")
-            .upsert({
-                "classroom_id": classroom_id,
-                "student_id":   student_id,
-                "fullname":     fullname,
-                "embedding":    embedding.tolist(),
-            })
-            .execute()
-        )
-        # optimistic local update — same reasoning as CooldownStore.mark_locally
         self._cache.setdefault(classroom_id, {})[student_id] = (fullname, embedding)
 
     # ── match — same cosine logic as before, just reading the new cache ─

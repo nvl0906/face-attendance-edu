@@ -84,7 +84,7 @@ async def setup_profile(
 
     result = await (
         db.table("student")
-        .update({"profile": profile_url})
+        .update({"profile": profile_url, "embedding": normalize(faces[0].embedding).tolist()})
         .eq("id", user.userid)
         .execute()
     )
@@ -98,46 +98,23 @@ async def setup_profile(
 async def get_embeddings(
     data: dict,
     db: AsyncClient = Depends(get_supabase),
-    face_app        = Depends(get_face_app),
-    embedding_store: EmbeddingStore = Depends(get_embedding_store),  # from app.state
+    embedding_store: EmbeddingStore = Depends(get_embedding_store),
 ):
     class_id = data.get("class_id")  # this is classroom_id
     if not class_id:
         raise HTTPException(status_code=422, detail="class_id is required")
 
     response = await (
-        db.table("student").select("id, fullname, profile").eq("classroom_id", class_id).execute()
+        db.table("student").select("id, fullname, embedding").eq("classroom_id", class_id).execute()
     )
     if not response.data:
         return {"status": "error", "message": "Aucun étudiant trouvé pour cette salle"}
 
-    loaded, skipped = 0, []
-    async with httpx.AsyncClient() as client:
-        for student in response.data:
-            fullname, student_id, profile_url = student["fullname"], student["id"], student.get("profile")
-            if not profile_url:
-                skipped.append(fullname); continue
-            try:
-                resp = await client.get(profile_url, timeout=10.0)
-                resp.raise_for_status()
-                img_bytes = resp.content
-            except Exception:
-                skipped.append(fullname); continue
+    for student in response.data:
+        fullname, student_id, embedding = student["fullname"], student["id"], student["embedding"]
+        await embedding_store.upsert(class_id, student_id, fullname, embedding)
 
-            np_img = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-            if img is None:
-                skipped.append(fullname); continue
-
-            faces = face_app.get(img)
-            if not faces or faces[0].embedding.shape[0] != 512:
-                skipped.append(fullname); continue
-
-            embedding = normalize(faces[0].embedding)
-            await embedding_store.upsert(class_id, student_id, fullname, embedding)
-            loaded += 1
-
-    return {"status": "success", "message": "Embeddings récupérés avec succès", "loaded": loaded, "skipped": skipped}
+    return {"status": "success", "message": "Embeddings récupérés avec succès"}
 
 @router.websocket("/recognize")
 async def ws_recognize(ws: WebSocket, token: str = Query(...)):
