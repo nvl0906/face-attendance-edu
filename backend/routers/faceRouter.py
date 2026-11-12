@@ -114,7 +114,7 @@ async def get_embeddings(
         fullname, student_id, embedding = student["fullname"], student["id"], student["embedding"]
         await embedding_store.upsert(class_id, student_id, fullname, embedding)
 
-    return {"status": "success", "message": "Embeddings récupérés avec succès"}
+    return {"status": "success", "message": "Prêt pour reconnaissance"}
 
 @router.websocket("/recognize")
 async def ws_recognize(ws: WebSocket, token: str = Query(...)):

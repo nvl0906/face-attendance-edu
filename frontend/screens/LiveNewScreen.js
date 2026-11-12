@@ -151,15 +151,14 @@ export default function LiveNewScreen({ route }) {
         if (!silent) {
           Toast.show({
             type:           'success',
-            text1:          'Préparation terminée',
-            text2:          `${resp.data.loaded} visage(s) chargé(s)`,
+            text1:          resp.data.message,
             position:       'top',
             visibilityTime: 3000,
           });
         }
       } else {
         if (!silent)
-          Toast.show({ type: 'error', text1: 'Erreur préparation', text2: resp.data.message, position: 'top', visibilityTime: 5000 });
+          Toast.show({ type: 'error', text1: resp.data.message, position: 'top', visibilityTime: 5000 });
       }
     } catch {
       if (!silent) {

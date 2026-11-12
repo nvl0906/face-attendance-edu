@@ -1,6 +1,4 @@
 import os
-from datetime import datetime
-from dateutil.parser import parse
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from insightface.app import FaceAnalysis
 from supabase import acreate_client
-from  routers import authRouter, faceRouter, gestionRouter
+from  routers import faceRouter
 from utils.cache import CooldownStore, EmbeddingStore
 
 @asynccontextmanager
@@ -65,8 +63,6 @@ app.add_middleware(
     expose_headers=["*"],
 )  
 
-app.include_router(authRouter.router)
-app.include_router(gestionRouter.router)
 app.include_router(faceRouter.router)  
 @app.get("/health")
 async def health():
