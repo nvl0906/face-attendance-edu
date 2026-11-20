@@ -62,8 +62,8 @@ const ClassroomScreen = ({ route, navigation }) => {
     try {
       const token = await SecureStore.getItemAsync("token");
       if (!token) throw new Error("Utilisateur non authentifié.");
-
-      const fileName = "tmi_presence.xlsx";
+      const date_today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const fileName = `${classroom.name}_${date_today}.xlsx`;
       const fileUri = FileSystem.cacheDirectory + fileName;
 
       // Axios GET request with token
