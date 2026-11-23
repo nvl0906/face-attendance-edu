@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 import numpy as np
 import time
 import json
@@ -12,8 +14,12 @@ from fastapi import APIRouter, Depends, Query, WebSocket, File, UploadFile, HTTP
 from supabase import AsyncClient
 from dependencies import get_current_user, get_supabase, verify_token, get_face_app, get_embedding_store
 from utils.cache import EmbeddingStore
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 router = APIRouter()
+
+MADAGASCAR_TZ = ZoneInfo("Indian/Antananarivo")  # UTC+3, same as Etc/GMT-3
 
 def normalize(vec: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vec)
@@ -104,17 +110,48 @@ async def get_embeddings(
     if not class_id:
         raise HTTPException(status_code=422, detail="class_id is required")
 
-    response = await (
-        db.table("student").select("id, fullname, embedding").eq("classroom_id", class_id).execute()
+    # Same timezone as penalty.penalty_date default
+    today = datetime.now(MADAGASCAR_TZ).date().isoformat()
+
+    students_resp = await (
+        db.table("student")
+        .select("id, fullname, embedding")
+        .eq("classroom_id", class_id)
+        .execute()
     )
-    if not response.data:
+    if not students_resp.data:
         return {"status": "error", "message": "Aucun étudiant trouvé pour cette salle"}
 
-    for student in response.data:
-        fullname, student_id, embedding = student["fullname"], student["id"], student["embedding"]
-        await embedding_store.upsert(class_id, student_id, fullname, embedding)
+    penalty_resp = await (
+        db.table("penalty")
+        .select("student_id")
+        .eq("classroom_id", class_id)
+        .eq("penalty_date", today)
+        .execute()
+    )
+    penalized_ids = {p["student_id"] for p in (penalty_resp.data or [])}
 
-    return {"status": "success", "message": "Prêt pour reconnaissance"}
+    loaded, excluded = 0, 0
+    for student in students_resp.data:
+        student_id = student["id"]
+
+        if student_id in penalized_ids:
+            # Make sure a previously loaded embedding doesn't linger in the store
+            await embedding_store.remove(class_id, student_id)
+            excluded += 1
+            continue
+
+        await embedding_store.upsert(
+            class_id, student_id, student["fullname"], student["embedding"]
+        )
+        loaded += 1
+
+    return {
+        "status": "success",
+        "message": "Prêt pour reconnaissance",
+        "loaded": loaded,
+        "excluded_penalized": excluded,
+    }
 
 @router.websocket("/recognize")
 async def ws_recognize(ws: WebSocket, token: str = Query(...)):

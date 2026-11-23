@@ -52,3 +52,4 @@ def get_face_app(request: Request) -> FaceAnalysis:
 
 def get_embedding_store(request: Request):
     return request.app.state.embedding_store
+

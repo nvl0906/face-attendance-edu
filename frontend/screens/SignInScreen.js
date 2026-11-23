@@ -11,6 +11,7 @@ export default function SignInScreen({ navigation }) {
     const c = useThemeStore((s) => s.primaryColor);
     const [loginType, setLoginType] = useState('login');
     const [username, setUsername] = useState('');
+    const [phone, setPhone] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [fullname, setFullname] = useState('');
@@ -23,7 +24,9 @@ export default function SignInScreen({ navigation }) {
     const handleFullname = (text) => {
         setFullname(text);
     };
-
+    const handlePhone = (text) => {
+        setPhone(text);
+    }
     const handlePassword = (text) => {
         setPassword(text);
     };
@@ -91,6 +94,7 @@ export default function SignInScreen({ navigation }) {
             const response = await api.post('/register', {
                 fullname,
                 username,
+                phone,
                 password,
                 confirmPassword,
                 registertype: loginType === 'registerStudent' ? 'student' : 'institution',
@@ -150,6 +154,7 @@ export default function SignInScreen({ navigation }) {
                 <>
                     <CustomInput placeholder="Nom complet" onDataReceived={handleFullname} value={fullname}/>
                     <CustomInput placeholder="Nom d'utilisateur" onDataReceived={handleUsername} value={username}/>
+                    <CustomInput placeholder="Numéro de téléphone" onDataReceived={handlePhone} value={phone}/>
                     <CustomInput type="password" placeholder="Mot de passe" onDataReceived={handlePassword} value={password}/>
                     <CustomInput type="password" placeholder="Confirmer le mot de passe" onDataReceived={handleConfirmPassword} value={confirmPassword}/>
                     <CustomButton title="S'inscrire" onPressButton={handleRegister} loading={loading}/>
@@ -159,6 +164,7 @@ export default function SignInScreen({ navigation }) {
                 <>
                     <CustomInput placeholder="Nom de votre établissement" onDataReceived={handleFullname} value={fullname}/>
                     <CustomInput placeholder="Nom d'utilisateur" onDataReceived={handleUsername} value={username}/>
+                    <CustomInput placeholder="Numéro de téléphone" onDataReceived={handlePhone} value={phone}/>
                     <CustomInput type="password" placeholder="Mot de passe" onDataReceived={handlePassword} value={password}/>
                     <CustomInput type="password" placeholder="Confirmer le mot de passe" onDataReceived={handleConfirmPassword} value={confirmPassword}/>
                     <CustomButton title="S'inscrire" onPressButton={handleRegister} loading={loading}/>

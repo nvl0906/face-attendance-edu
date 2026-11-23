@@ -185,6 +185,15 @@ class EmbeddingStore:
     async def upsert(self, classroom_id: str, student_id: str, fullname: str, embedding: np.ndarray):
         self._cache.setdefault(classroom_id, {})[student_id] = (fullname, embedding)
 
+    # ── remove a student from the cache (e.g. penalized for the day) ───
+    async def remove(self, classroom_id: str, student_id: str) -> bool:
+        """Drop a student's embedding so they can no longer be matched.
+        Returns True if the student was in the cache."""
+        bucket = self._cache.get(classroom_id)
+        if not bucket:
+            return False
+        return bucket.pop(student_id, None) is not None
+
     # ── match — same cosine logic as before, just reading the new cache ─
     def match(self, classroom_id: str, embedding: np.ndarray) -> tuple[str, str] | None:
         embedding = embedding / (np.linalg.norm(embedding) or 1)
