@@ -109,7 +109,7 @@ async def get_embeddings(
         "status": "success",
         "message": "Prêt pour reconnaissance",
         "loaded": loaded,
-        "excluded_penalized": len(embedding_store._blocked.get(class_id, ())),
+        "excluded_penalized": embedding_store.blocked_now(class_id),
     }
 
 @router.websocket("/recognize")

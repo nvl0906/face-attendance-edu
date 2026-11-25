@@ -9,7 +9,7 @@ Redis/pubsub layer.
 """
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
 import numpy as np
 from scipy.spatial.distance import cosine
 from dateutil.parser import parse as parse_dt
@@ -133,8 +133,10 @@ class EmbeddingStore:
         self._supabase = supabase
         self._threshold = threshold
         self._cache: dict[str, dict[str, tuple[str, np.ndarray]]] = {}
-        self._loaded_on: dict[str, str] = {}        
-        self._blocked: dict[str, set[str]] = {}   
+        self._loaded_on: dict[str, str] = {}
+        # classroom_id -> {(student_id, session)}; session None = whole day
+        self._blocked: dict[str, set[tuple[str, str | None]]] = {}
+        self._afternoon_start: dict[str, time] = {}   # classroom_id -> start_afternoon
         self._channel = None
 
     @staticmethod
@@ -148,6 +150,16 @@ class EmbeddingStore:
             or payload.get("record")
             or payload.get("new")
             or {}
+        )
+
+    def _current_session(self, classroom_id: str) -> str:
+        start = self._afternoon_start.get(classroom_id, time(12, 0))  # fallback
+        return "morning" if datetime.now(TZ).time() < start else "afternoon"
+
+    def blocked_now(self, classroom_id: str) -> int:
+        session = self._current_session(classroom_id)
+        return sum(
+            1 for _, s in self._blocked.get(classroom_id, ()) if s in (session, None)
         )
 
     async def start(self):
@@ -165,7 +177,6 @@ class EmbeddingStore:
             await self._supabase.remove_channel(self._channel)
             self._channel = None
 
-    # ── (re)load a classroom: once per day, or when forced ──────────────
     async def ensure_loaded(self, classroom_id: str, force: bool = False):
         today = self._today()
         if not force and self._loaded_on.get(classroom_id) == today:
@@ -179,68 +190,72 @@ class EmbeddingStore:
         )
         penalties = await (
             self._supabase.table("penalty")
-            .select("student_id")
+            .select("student_id, session")
             .eq("classroom_id", classroom_id)
             .eq("penalty_date", today)
             .execute()
         )
-        blocked = {p["student_id"] for p in (penalties.data or [])}
+        classroom = await (
+            self._supabase.table("classroom")
+            .select("start_afternoon")
+            .eq("id", classroom_id)
+            .single()
+            .execute()
+        )
 
-        bucket = {}
-        for row in students.data or []:
-            if row["id"] in blocked or not row.get("embedding"):
-                continue
-            bucket[row["id"]] = (row["fullname"], np.array(row["embedding"], dtype=np.float32))
+        if classroom.data and classroom.data.get("start_afternoon"):
+            self._afternoon_start[classroom_id] = time.fromisoformat(
+                classroom.data["start_afternoon"]
+            )
 
-        # replace, don't merge, so stale entries from yesterday disappear
-        self._cache[classroom_id] = bucket
-        self._blocked[classroom_id] = blocked
+        # everyone with a face stays in the cache; blocking happens in match()
+        self._cache[classroom_id] = {
+            r["id"]: (r["fullname"], np.array(r["embedding"], dtype=np.float32))
+            for r in (students.data or [])
+            if r.get("embedding")
+        }
+        self._blocked[classroom_id] = {
+            (p["student_id"], p["session"]) for p in (penalties.data or [])
+        }
         self._loaded_on[classroom_id] = today
 
-    # ── realtime: student updated ───────────────────────────────────────
     def _on_change(self, payload: dict):
         record = self._record(payload)
-        classroom_id = record.get("classroom_id")
-        student_id = record.get("id")
-        fullname = record.get("fullname")
-        embedding = record.get("embedding")
+        classroom_id, student_id = record.get("classroom_id"), record.get("id")
+        fullname, embedding = record.get("fullname"), record.get("embedding")
         if not (classroom_id and student_id and fullname and embedding):
             return
-        if student_id in self._blocked.get(classroom_id, ()):
-            return  # penalized today: keep out
         self._cache.setdefault(classroom_id, {})[student_id] = (
             fullname, np.array(embedding, dtype=np.float32)
         )
-        print(f"Updated student {student_id} in classroom {classroom_id}")
 
-    # ── realtime: penalty created -> unrecognizable immediately ─────────
     def _on_penalty(self, payload: dict):
         record = self._record(payload)
-        classroom_id = record.get("classroom_id")
-        student_id = record.get("student_id")
+        classroom_id, student_id = record.get("classroom_id"), record.get("student_id")
         if not (classroom_id and student_id):
             return
         if record.get("penalty_date") != self._today():
             return
-        self._blocked.setdefault(classroom_id, set()).add(student_id)
-        self._cache.get(classroom_id, {}).pop(student_id, None)
-
-    async def remove(self, classroom_id: str, student_id: str) -> bool:
-        self._blocked.setdefault(classroom_id, set()).add(student_id)
-        return self._cache.get(classroom_id, {}).pop(student_id, None) is not None
+        self._blocked.setdefault(classroom_id, set()).add(
+            (student_id, record.get("session"))
+        )
 
     async def upsert(self, classroom_id, student_id, fullname, embedding):
-        if not embedding or student_id in self._blocked.get(classroom_id, ()):
+        if not embedding:
             return
         self._cache.setdefault(classroom_id, {})[student_id] = (
             fullname, np.array(embedding, dtype=np.float32)
         )
 
-    # ── match — same cosine logic as before, just reading the new cache ─
     def match(self, classroom_id: str, embedding: np.ndarray) -> tuple[str, str] | None:
         embedding = embedding / (np.linalg.norm(embedding) or 1)
+        session = self._current_session(classroom_id)
+        blocked = self._blocked.get(classroom_id, set())
+
         best, best_dist = None, float("inf")
         for student_id, (fullname, known) in self._cache.get(classroom_id, {}).items():
+            if (student_id, session) in blocked or (student_id, None) in blocked:
+                continue
             dist = cosine(embedding, known)
             if dist < self._threshold and dist < best_dist:
                 best, best_dist = (student_id, fullname), dist
