@@ -19,8 +19,7 @@ jobs:
       - name: Restart backend container
         run: |
           if docker ps --format '{{.Names}}' | grep -q '^face-attendance-edu-cpu$'; then
-            echo "Container running — restarting"
-            docker compose -f /home/naval/face-attendance-edu/backend/docker-compose.cpu.yml restart
+            echo "The container is running — Notihng to do"
           else
             echo "Container not running — building and starting"
             docker compose -f /home/naval/face-attendance-edu/backend/docker-compose.cpu.yml up -d --build
@@ -40,8 +39,7 @@ jobs:
       - name: Restart backend container
         run: |
           if docker ps --format '{{.Names}}' | grep -q '^face-attendance-edu-cpu$'; then
-            echo "Container running — restarting"
-            docker compose -f /home/naval/face-attendance-edu/backend/docker-compose.gpu.yml restart
+            echo "The container is running — Notihng to do"
           else
             echo "Container not running — building and starting"
             docker compose -f /home/naval/face-attendance-edu/backend/docker-compose.gpu.yml up -d --build

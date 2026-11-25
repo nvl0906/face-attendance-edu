@@ -11,6 +11,7 @@ services:
     env_file:
       - .env
     volumes:
+      - .:/app
       - ./models:/app/models
     deploy:
       resources:
