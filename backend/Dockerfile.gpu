@@ -21,4 +21,4 @@ ENV INSIGHTFACE_HOME=/app
 
 EXPOSE 8002
 
-CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "1", "--log-level", "info", "--reload"]]
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "1", "--log-level", "info", "--reload"]
