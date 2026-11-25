@@ -23,7 +23,7 @@ const toMinutes = (timeStr) => {
 const getCheckType = (classroom) => {
   const now  = new Date();
   const curr = now.getHours() * 60 + now.getMinutes();
-  const GRACE = 5;
+  const GRACE = 1;
   const windows = [
     { type: 'morning_in',    pivot: toMinutes(classroom.start_morning)   },
     { type: 'morning_out',   pivot: toMinutes(classroom.end_morning)     },
