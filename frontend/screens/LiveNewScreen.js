@@ -151,7 +151,8 @@ export default function LiveNewScreen({ route }) {
         if (!silent) {
           Toast.show({
             type:           'success',
-            text1:          resp.data.message,
+            text1:          resp.data.loaded + ' étudiants chargés',
+            text2:          resp.data.excluded_penalized + ' étudiants exclus',
             position:       'top',
             visibilityTime: 3000,
           });

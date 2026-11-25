@@ -1,25 +1,15 @@
-from zoneinfo import ZoneInfo
-
 import numpy as np
 import time
 import json
 import cv2
-from PIL import Image
 from urllib.parse import urlparse
-from scipy.spatial.distance import cosine
-import httpx
-from datetime import datetime, timezone
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 from fastapi import APIRouter, Depends, Query, WebSocket, File, UploadFile, HTTPException
 from supabase import AsyncClient
 from dependencies import get_current_user, get_supabase, verify_token, get_face_app, get_embedding_store
 from utils.cache import EmbeddingStore
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 router = APIRouter()
-
-MADAGASCAR_TZ = ZoneInfo("Indian/Antananarivo")  # UTC+3, same as Etc/GMT-3
 
 def normalize(vec: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(vec)
@@ -103,54 +93,23 @@ async def setup_profile(
 @router.post("/embeddings")
 async def get_embeddings(
     data: dict,
-    db: AsyncClient = Depends(get_supabase),
     embedding_store: EmbeddingStore = Depends(get_embedding_store),
 ):
-    class_id = data.get("class_id")  # this is classroom_id
+    class_id = data.get("class_id")
     if not class_id:
         raise HTTPException(status_code=422, detail="class_id is required")
 
-    # Same timezone as penalty.penalty_date default
-    today = datetime.now(MADAGASCAR_TZ).date().isoformat()
+    await embedding_store.ensure_loaded(class_id, force=True)
 
-    students_resp = await (
-        db.table("student")
-        .select("id, fullname, embedding")
-        .eq("classroom_id", class_id)
-        .execute()
-    )
-    if not students_resp.data:
+    loaded = len(embedding_store._cache.get(class_id, {}))
+    if not loaded:
         return {"status": "error", "message": "Aucun étudiant trouvé pour cette salle"}
-
-    penalty_resp = await (
-        db.table("penalty")
-        .select("student_id")
-        .eq("classroom_id", class_id)
-        .eq("penalty_date", today)
-        .execute()
-    )
-    penalized_ids = {p["student_id"] for p in (penalty_resp.data or [])}
-
-    loaded, excluded = 0, 0
-    for student in students_resp.data:
-        student_id = student["id"]
-
-        if student_id in penalized_ids:
-            # Make sure a previously loaded embedding doesn't linger in the store
-            await embedding_store.remove(class_id, student_id)
-            excluded += 1
-            continue
-
-        await embedding_store.upsert(
-            class_id, student_id, student["fullname"], student["embedding"]
-        )
-        loaded += 1
 
     return {
         "status": "success",
         "message": "Prêt pour reconnaissance",
         "loaded": loaded,
-        "excluded_penalized": excluded,
+        "excluded_penalized": len(embedding_store._blocked.get(class_id, ())),
     }
 
 @router.websocket("/recognize")

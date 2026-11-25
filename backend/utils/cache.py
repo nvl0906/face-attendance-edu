@@ -13,9 +13,10 @@ from datetime import datetime, timezone, timedelta
 import numpy as np
 from scipy.spatial.distance import cosine
 from dateutil.parser import parse as parse_dt
+from zoneinfo import ZoneInfo
 
 MADAGASCAR_OFFSET = timedelta(hours=3)
-
+TZ = ZoneInfo("Indian/Antananarivo")
 
 class CooldownStore:
     def __init__(self, supabase, cooldown_minutes: int = 1):
@@ -131,15 +132,31 @@ class EmbeddingStore:
     def __init__(self, supabase, threshold: float = 0.59999):
         self._supabase = supabase
         self._threshold = threshold
-        # classroom_id -> { student_id: (fullname, embedding) }
         self._cache: dict[str, dict[str, tuple[str, np.ndarray]]] = {}
-        self._loaded_classrooms: set[str] = set()
+        self._loaded_on: dict[str, str] = {}        
+        self._blocked: dict[str, set[str]] = {}   
         self._channel = None
+
+    @staticmethod
+    def _today() -> str:
+        return datetime.now(TZ).date().isoformat()
+
+    @staticmethod
+    def _record(payload: dict) -> dict:
+        return (
+            payload.get("data", {}).get("record")
+            or payload.get("record")
+            or payload.get("new")
+            or {}
+        )
 
     async def start(self):
         self._channel = self._supabase.channel("face-embedding-sync")
         self._channel.on_postgres_changes(
             "UPDATE", schema="public", table="student", callback=self._on_change,
+        )
+        self._channel.on_postgres_changes(
+            "INSERT", schema="public", table="penalty", callback=self._on_penalty,
         )
         await self._channel.subscribe()
 
@@ -148,51 +165,76 @@ class EmbeddingStore:
             await self._supabase.remove_channel(self._channel)
             self._channel = None
 
-    # ── lazy per-classroom load — don't pull every classroom on boot ────
-    async def ensure_loaded(self, classroom_id: str):
-        if classroom_id in self._loaded_classrooms:
+    # ── (re)load a classroom: once per day, or when forced ──────────────
+    async def ensure_loaded(self, classroom_id: str, force: bool = False):
+        today = self._today()
+        if not force and self._loaded_on.get(classroom_id) == today:
             return
-        resp = await (
+
+        students = await (
             self._supabase.table("student")
             .select("id, fullname, embedding")
             .eq("classroom_id", classroom_id)
             .execute()
         )
-        bucket = self._cache.setdefault(classroom_id, {})
-        for row in resp.data or []:
-            bucket[row["id"]] = (row["fullname"], np.array(row["embedding"], dtype=np.float32))
-        self._loaded_classrooms.add(classroom_id)
-
-    # ── realtime callback keeps every node's cache current ─────────────
-    def _on_change(self, payload: dict):
-        record = (
-            payload.get("data", {}).get("record")
-            or payload.get("record")
-            or payload.get("new")
-            or {}
+        penalties = await (
+            self._supabase.table("penalty")
+            .select("student_id")
+            .eq("classroom_id", classroom_id)
+            .eq("penalty_date", today)
+            .execute()
         )
+        blocked = {p["student_id"] for p in (penalties.data or [])}
+
+        bucket = {}
+        for row in students.data or []:
+            if row["id"] in blocked or not row.get("embedding"):
+                continue
+            bucket[row["id"]] = (row["fullname"], np.array(row["embedding"], dtype=np.float32))
+
+        # replace, don't merge, so stale entries from yesterday disappear
+        self._cache[classroom_id] = bucket
+        self._blocked[classroom_id] = blocked
+        self._loaded_on[classroom_id] = today
+
+    # ── realtime: student updated ───────────────────────────────────────
+    def _on_change(self, payload: dict):
+        record = self._record(payload)
         classroom_id = record.get("classroom_id")
         student_id = record.get("id")
         fullname = record.get("fullname")
         embedding = record.get("embedding")
         if not (classroom_id and student_id and fullname and embedding):
             return
-        bucket = self._cache.setdefault(classroom_id, {})
-        bucket[student_id] = (fullname, np.array(embedding, dtype=np.float32))
-        self._loaded_classrooms.add(classroom_id)
+        if student_id in self._blocked.get(classroom_id, ()):
+            return  # penalized today: keep out
+        self._cache.setdefault(classroom_id, {})[student_id] = (
+            fullname, np.array(embedding, dtype=np.float32)
+        )
+        print(f"Updated student {student_id} in classroom {classroom_id}")
 
-    # ── write path — called from /embeddings after computing a face ────
-    async def upsert(self, classroom_id: str, student_id: str, fullname: str, embedding: np.ndarray):
-        self._cache.setdefault(classroom_id, {})[student_id] = (fullname, embedding)
+    # ── realtime: penalty created -> unrecognizable immediately ─────────
+    def _on_penalty(self, payload: dict):
+        record = self._record(payload)
+        classroom_id = record.get("classroom_id")
+        student_id = record.get("student_id")
+        if not (classroom_id and student_id):
+            return
+        if record.get("penalty_date") != self._today():
+            return
+        self._blocked.setdefault(classroom_id, set()).add(student_id)
+        self._cache.get(classroom_id, {}).pop(student_id, None)
 
-    # ── remove a student from the cache (e.g. penalized for the day) ───
     async def remove(self, classroom_id: str, student_id: str) -> bool:
-        """Drop a student's embedding so they can no longer be matched.
-        Returns True if the student was in the cache."""
-        bucket = self._cache.get(classroom_id)
-        if not bucket:
-            return False
-        return bucket.pop(student_id, None) is not None
+        self._blocked.setdefault(classroom_id, set()).add(student_id)
+        return self._cache.get(classroom_id, {}).pop(student_id, None) is not None
+
+    async def upsert(self, classroom_id, student_id, fullname, embedding):
+        if not embedding or student_id in self._blocked.get(classroom_id, ()):
+            return
+        self._cache.setdefault(classroom_id, {})[student_id] = (
+            fullname, np.array(embedding, dtype=np.float32)
+        )
 
     # ── match — same cosine logic as before, just reading the new cache ─
     def match(self, classroom_id: str, embedding: np.ndarray) -> tuple[str, str] | None:
